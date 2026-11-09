@@ -1,0 +1,7 @@
+PRIVATE_*
+__pycache__/
+*.pyc
+.DS_Store
+# vendor board models (not ours to redistribute)
+*seeed*board*.step
+XIAO-ESP32S3*.step
