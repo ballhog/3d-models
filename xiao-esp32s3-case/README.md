@@ -70,3 +70,8 @@ Common tweaks: `ANT_L` / `ANT_W` (antenna size, since generic flex antennas vary
 
 - The case is designed around the Seeed antenna that ships with the XIAO ESP32S3. Measure your antenna if you're using a different one.
 - The board model used for fit-checking is Seeed's and isn't included here; it's available from Seeed's wiki.
+
+## License
+
+Design files: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Credit: Joe ([ballhog](https://github.com/ballhog)).
+`source/xiao_s3_case.py`: MIT. See the repo [LICENSE](../LICENSE).
