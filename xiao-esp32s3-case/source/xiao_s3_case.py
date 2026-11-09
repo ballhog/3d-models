@@ -1,6 +1,6 @@
-"""
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Joe (github.com/ballhog)
+"""
 Seeed XIAO ESP32S3 long case: board at one end, FPC antenna at the other.
 Parametric CadQuery model -> STEP (for Onshape) + STL (for printing).
 
