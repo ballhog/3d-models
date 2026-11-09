@@ -5,7 +5,15 @@ Parametric CadQuery model -> STEP (for Onshape) + STL (for printing).
 Coordinates: X = length (USB-C end at x=0), Y = width (centred), Z = up.
 All dimensions in mm. VERIFY the *_VERIFY values with calipers before printing.
 """
+import os
 import cadquery as cq
+
+# Variant: "standard" (board on ledges, no pins) or "breakout" (pin headers soldered
+# underneath, long pins exit through the floor for a breadboard / Dupont jumpers).
+# Select with:  XIAO_VARIANT=breakout python xiao_s3_case.py
+VARIANT = os.environ.get("XIAO_VARIANT", "standard")
+BREAKOUT = VARIANT == "breakout"
+
 
 # ---------------- parameters ----------------
 WALL = 1.6          # side wall thickness
@@ -19,7 +27,15 @@ LIP_T = 1.0         # lid lip wall thickness
 PCB_L = 20.95       # along X (USB edge to antenna-connector edge)  [from Seeed STEP]
 PCB_W = 17.78       # along Y
 PCB_T = 1.0
-STANDOFF = 1.0      # board sits on ledges this high (clears bottom pads)
+# Breakout headers: 2 x 7 pins, 2.54 pitch, rows 15.24 apart, centred on the board
+HDR_PITCH, HDR_N, HDR_ROW_Y = 2.54, 7, 7.62
+HDR_BODY_H = 2.5    # plastic body height (sits under the PCB)
+HDR_FIT = 0.15      # pocket clearance per side
+HDR_WEB = 0.4       # floor left under the header bodies (pins pass through)
+PIN_HOLE_D = 1.1    # 0.64 mm square pins
+PIN_STUB = 3.0      # short pin end above PCB top (worst case, untrimmed)
+
+STANDOFF = (HDR_WEB + HDR_BODY_H - FLOOR) if BREAKOUT else 1.0  # PCB bottom above floor top
 TOP_STACK = 3.4     # USB-C shell 3.21 above PCB; u.FL plug ~2.5; shield 2.0
 
 USB_W, USB_H = 9.4, 4.6     # USB-C shell 8.94 x 4.20 + clearance
@@ -63,7 +79,7 @@ GRIP_DEPTH = 0.5
 GRIP_W = 1.2              # groove width at surface
 
 # lid snaps: half-round ridges on the lid lip click into grooves in the base walls
-SNAP_X = (16.0, 50.0, 75.0)   # along length (both sides)
+SNAP_X = (27.0, 50.0, 75.0) if BREAKOUT else (16.0, 50.0, 75.0)   # along length (both sides)
 SNAP_LEN = 6.0
 SNAP_R = 0.45                 # ridge radius (protrudes SNAP_R - LIP_CLR past the lip)
 SNAP_Z = 0.9                  # below lid underside
@@ -104,8 +120,21 @@ cavity = cq.Workplane("XY").box(IN_L, IN_W, IN_H, centered=(False, True, False))
     .translate((WALL, 0, FLOOR))
 base = base.cut(cavity)
 
-# board ledges along both long sides (leave centre open for bottom pads)
-for s in (1, -1):
+# board support
+if BREAKOUT:
+    # pockets for the header bodies + through-holes for the long pins
+    hdr_cx = pcb_x0 + PCB_L / 2
+    hdr_len = HDR_N * HDR_PITCH
+    for s in (1, -1):
+        base = base.cut(cq.Workplane("XY").box(hdr_len + 2 * HDR_FIT, HDR_PITCH + 2 * HDR_FIT, FLOOR,
+                                              centered=(True, True, False))
+                        .translate((hdr_cx, s * HDR_ROW_Y, HDR_WEB)))
+        for k in range(HDR_N):
+            px = hdr_cx + (k - (HDR_N - 1) / 2) * HDR_PITCH
+            base = base.cut(cq.Workplane("XY").circle(PIN_HOLE_D / 2).extrude(FLOOR + 1)
+                            .translate((px, s * HDR_ROW_Y, -0.5)))
+# board ledges along both long sides (standard variant)
+for s in (() if BREAKOUT else (1, -1)):
     ledge = cq.Workplane("XY").box(PCB_L, 2.0, STANDOFF, centered=(False, True, False)) \
         .translate((pcb_x0, s * (IN_W / 2 - 1.0), FLOOR))
     base = base.union(ledge)
@@ -177,7 +206,7 @@ lid = lid.cut(cq.Workplane("XY").box(LIP_T + LIP_CLR + 0.2, USB_W + 1, LIP_H + 0
                                      centered=(False, True, False)).translate((WALL, 0, -LIP_H - 0.05)))
 
 # remove the lip at the board end so it can't stiffen the flexures
-lid = lid.cut(cq.Workplane("XY").box(BTN_X + FLEX_L + 2.0, IN_W + 1, LIP_H + 0.1,
+lid = lid.cut(cq.Workplane("XY").box((PCB_L + 1.5) if BREAKOUT else (BTN_X + FLEX_L + 2.0), IN_W + 1, LIP_H + 0.1,
                                      centered=(False, True, False)).translate((WALL - 0.1, 0, -LIP_H - 0.05)))
 
 # flexure buttons: U-slot around a tab hinged toward the antenna end, plunger underneath
@@ -213,7 +242,7 @@ for sx in SNAP_X:
         lid = lid.union(r)
 # board hold-down ribs on PCB long edges (behind the flexures)
 hold_len = OUT_H - (pcb_top + HOLD_GAP)
-for s_ in (1, -1):
+for s_ in (() if BREAKOUT else (1, -1)):   # breakout: pin stubs sit here; the header pockets locate the board
     lid = lid.union(cq.Workplane("XY").box(HOLD_X[1] - HOLD_X[0], 0.8, hold_len + 0.3, centered=(False, True, False))
                     .translate((pcb_x0 + HOLD_X[0], s_ * HOLD_Y, -hold_len)))
 # u.FL retainer pad
@@ -235,19 +264,20 @@ for side in LED_SIDES:
 lid_installed = lid.translate((0, 0, OUT_H))
 
 if __name__ == "__main__":
-    import os
-    out = os.path.dirname(os.path.abspath(__file__))
-    cq.exporters.export(base, f"{out}/xiao_s3_case_base.step")
-    cq.exporters.export(lid_installed, f"{out}/xiao_s3_case_lid.step")
-    cq.exporters.export(base, f"{out}/xiao_s3_case_base.stl")
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), VARIANT)
+    os.makedirs(out, exist_ok=True)
+    NAME = "xiao_s3_case" if not BREAKOUT else "xiao_s3_case_breakout"
+    cq.exporters.export(base, f"{out}/{NAME}_base.step")
+    cq.exporters.export(lid_installed, f"{out}/{NAME}_lid.step")
+    cq.exporters.export(base, f"{out}/{NAME}_base.stl")
     flip = lambda w: w.rotate((0, 0, 0), (1, 0, 0), 180).translate((0, 0, LID_T))
-    cq.exporters.export(flip(lid), f"{out}/xiao_s3_case_lid_print.stl")
+    cq.exporters.export(flip(lid), f"{out}/{NAME}_lid_print.stl")
 
-    cq.Assembly().add(base, name="base").add(lid_installed, name="lid").save(f"{out}/xiao_s3_case_assembly.step")
+    cq.Assembly().add(base, name="base").add(lid_installed, name="lid").save(f"{out}/{NAME}_assembly.step")
     # fit-test coupon: board end only
     cut = cq.Workplane("XY").box(30, 60, 60, centered=(False, True, True))
-    cq.exporters.export(base.intersect(cut), f"{out}/fittest_base.stl")
-    cq.exporters.export(flip(lid.intersect(cut.translate((0, 0, 0)))), f"{out}/fittest_lid_print.stl")
+    cq.exporters.export(base.intersect(cut), f"{out}/{NAME}_fittest_base.stl")
+    cq.exporters.export(flip(lid.intersect(cut.translate((0, 0, 0)))), f"{out}/{NAME}_fittest_lid_print.stl")
     asm = cq.Assembly().add(base, name="base").add(lid_installed, name="lid")
     board_step = os.environ.get("XIAO_STEP")
     if board_step:
@@ -257,5 +287,5 @@ if __name__ == "__main__":
         b = b.translate((pcb_x0 + 12.28, 6.11, pcb_z))
         asm.add(b, name="xiao_esp32s3", color=cq.Color(0.1, 0.4, 0.15))
         globals()["board_placed"] = b
-    asm.save(f"{out}/PRIVATE_assembly_with_seeed_board.step")
+    asm.save(f"{out}/PRIVATE_{NAME}_assembly_with_seeed_board.step")
     print(f"Outer: {OUT_L:.1f} x {OUT_W:.1f} x {OUT_H + LID_T:.1f} mm, nub length {nub_len:.2f}")
